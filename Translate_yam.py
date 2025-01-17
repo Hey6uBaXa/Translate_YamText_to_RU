@@ -1,58 +1,51 @@
 import yaml
-import re
-import asyncio
-from aiogoogletrans import Translator  # Используем асинхронный форк библиотеки googletrans
+from deep_translator import GoogleTranslator
+import ruamel.yaml
 
-# Функция для асинхронного перевода текста с учётом исключений для {$...}
-async def translate_to_russian(text, translator):
-    # Асинхронная функция для замены текста
-    async def replace_func(match):
-        if match.group(0).startswith("{$"):
-            return match.group(0)  # Оставляем макросы без изменений
-        else:
-            translated = await translator.translate(match.group(0), src="en", dest="ru")
-            return translated.text
+def translate_to_russian(text):
+    try:
+        return GoogleTranslator(source='en', target='ru').translate(text)
+    except Exception as e:
+        print(f"Ошибка перевода текста: {text}. Ошибка: {e}")
+        return text
 
-    # Перебираем все совпадения и переводим
-    tasks = [replace_func(match) for match in re.finditer(r'\{[^}]+\}|\b.*?\b', text)]
-    translated_parts = await asyncio.gather(*tasks)  # Асинхронно ждём выполнения всех переводов
 
-    # Соединяем переведённый текст
-    return ''.join(translated_parts)
-
-# Асинхронная рекурсивная обработка YAML-данных
-async def process_dict_with_translation(data, translator):
+# Рекурсивная функция для обхода всех элементов YAML
+def traverse_yaml(data, level=1):
     if isinstance(data, dict):
         for key, value in data.items():
-            if key in {"name", "description", "expression", "event_name"} and isinstance(value, str):
-                data[key] = await translate_to_russian(value, translator)
-            elif isinstance(value, (dict, list)):
-                await process_dict_with_translation(value, translator)
+            if key in {'description', 'event_name'} and isinstance(value, str):
+                #transl = translator.translate(value, src="en", dest="ru").text
+                data[key] = translate_to_russian(value) 
+                #print("  " * level + f"Ключ: {key}, Значение: {translate_to_russian(value)}")
+            traverse_yaml(value, level + 1)
     elif isinstance(data, list):
-        for item in data:
-            await process_dict_with_translation(item, translator)
+        for index, item in enumerate(data):
+            traverse_yaml(item, level + 1)
 
-# Основная функция для обработки файла
-async def main():
-    input_file_path = r"d:\Clouds\OneDrive - AVECTIS CJSC\Desktop\Test_Translate_Text\zbx_export_templates.yaml"
-    output_file_translated_path = r"d:\Clouds\OneDrive - AVECTIS CJSC\Desktop\Test_Translate_Text\zbx_export_templates_translate.yaml"
+# Кастомный Dumper для сохранения строк с одиночными кавычками
+class CustomDumper(yaml.SafeDumper):
+    def represent_str(self, data):
+        return self.represent_scalar('tag:yaml.org,2002:str', data, style="'")
 
-    # Инициализация переводчика
-    translator = Translator(timeout=10)
+# Чтение YAML файла
+file_path = r"d:\Clouds\OneDrive - AVECTIS CJSC\Desktop\Test_Translate_Text\Zabbix_Server_Health.yaml"
+output_file_path = r"d:\Clouds\OneDrive - AVECTIS CJSC\Desktop\Test_Translate_Text\Zabbix_Server_Health_translate.yaml"
 
-    # Чтение YAML файла
-    with open(input_file_path, "r", encoding="utf-8") as file:
-        yaml_data = yaml.safe_load(file)
+# Создание объекта YAML для настройки
+yaml = ruamel.yaml.YAML()
+yaml.preserve_quotes = True  # Сохранять кавычки
 
-    # Перевод данных
-    await process_dict_with_translation(yaml_data, translator)
+# Открываем исходный YAML файл для чтения
+with open(file_path, "r", encoding="utf-8") as file:
+    yaml_data = yaml.load(file)
 
-    # Запись переведённого YAML в файл
-    with open(output_file_translated_path, "w", encoding="utf-8") as file:
-        yaml.safe_dump(yaml_data, file, allow_unicode=True)
+# Обход всех элементов
+traverse_yaml(yaml_data)
 
-    print(f"Переведённый файл сохранён по пути: {output_file_translated_path}")
+#print(yaml_data)
+# Открываем файл для записи
+with open(output_file_path, "w", encoding="utf-8") as file:
+    yaml.dump(yaml_data, file)
 
-# Запуск программы
-asyncio.run(main())
-
+print(f"Переведённый файл сохранён по пути: {output_file_path}")
